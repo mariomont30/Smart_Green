@@ -1,0 +1,262 @@
+{
+  "version": 1,
+  "author": "Smart_Green CPS",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "wokwi-esp32-devkit-v1",
+      "id": "esp",
+      "top": 10,
+      "left": 5,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-potentiometer",
+      "id": "soil",
+      "top": -215,
+      "left": -180,
+      "attrs": {
+        "value": "512"
+      }
+    },
+    {
+      "type": "wokwi-dht22",
+      "id": "dht",
+      "top": -195,
+      "left": 20,
+      "attrs": {
+        "temperature": "28",
+        "humidity": "65"
+      }
+    },
+    {
+      "type": "wokwi-pushbutton",
+      "id": "btn",
+      "top": 230,
+      "left": -160,
+      "attrs": {
+        "color": "blue",
+        "label": "IRRIGAR MANUAL"
+      }
+    },
+    {
+      "type": "wokwi-slide-switch",
+      "id": "net",
+      "top": 250,
+      "left": 95,
+      "attrs": {
+        "value": "",
+        "bounce": "0"
+      }
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servo",
+      "top": -210,
+      "left": 270,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-lcd1602",
+      "id": "lcd",
+      "top": 30,
+      "left": 330,
+      "attrs": {
+        "pins": "i2c"
+      }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "green",
+      "top": 155,
+      "left": 325,
+      "attrs": {
+        "color": "green"
+      }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "red",
+      "top": 155,
+      "left": 405,
+      "attrs": {
+        "color": "red"
+      }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "rg",
+      "top": 206,
+      "left": 315,
+      "rotate": 90,
+      "attrs": {
+        "value": "220"
+      }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "rr",
+      "top": 206,
+      "left": 395,
+      "rotate": 90,
+      "attrs": {
+        "value": "220"
+      }
+    },
+    {
+      "type": "wokwi-text",
+      "id": "netLabel",
+      "top": 290,
+      "left": 75,
+      "attrs": {
+        "text": "NET: esquerda ONLINE | direita OFFLINE"
+      }
+    }
+  ],
+  "connections": [
+    [
+      "soil:VCC",
+      "esp:3V3",
+      "red",
+      []
+    ],
+    [
+      "soil:GND",
+      "esp:GND.1",
+      "black",
+      []
+    ],
+    [
+      "soil:SIG",
+      "esp:D34",
+      "green",
+      []
+    ],
+    [
+      "dht:VCC",
+      "esp:3V3",
+      "red",
+      []
+    ],
+    [
+      "dht:GND",
+      "esp:GND.1",
+      "black",
+      []
+    ],
+    [
+      "dht:SDA",
+      "esp:D18",
+      "green",
+      []
+    ],
+    [
+      "btn:1.l",
+      "esp:D19",
+      "blue",
+      []
+    ],
+    [
+      "btn:2.l",
+      "esp:GND.1",
+      "black",
+      []
+    ],
+    [
+      "net:2",
+      "esp:D23",
+      "blue",
+      []
+    ],
+    [
+      "net:1",
+      "esp:GND.1",
+      "black",
+      []
+    ],
+    [
+      "net:3",
+      "esp:3V3",
+      "red",
+      []
+    ],
+    [
+      "servo:V+",
+      "esp:VIN",
+      "red",
+      []
+    ],
+    [
+      "servo:GND",
+      "esp:GND.2",
+      "black",
+      []
+    ],
+    [
+      "servo:PWM",
+      "esp:D13",
+      "orange",
+      []
+    ],
+    [
+      "lcd:VCC",
+      "esp:VIN",
+      "red",
+      []
+    ],
+    [
+      "lcd:GND",
+      "esp:GND.2",
+      "black",
+      []
+    ],
+    [
+      "lcd:SDA",
+      "esp:D21",
+      "green",
+      []
+    ],
+    [
+      "lcd:SCL",
+      "esp:D22",
+      "blue",
+      []
+    ],
+    [
+      "green:A",
+      "esp:D26",
+      "green",
+      []
+    ],
+    [
+      "green:C",
+      "rg:1",
+      "black",
+      []
+    ],
+    [
+      "rg:2",
+      "esp:GND.2",
+      "black",
+      []
+    ],
+    [
+      "red:A",
+      "esp:D27",
+      "red",
+      []
+    ],
+    [
+      "red:C",
+      "rr:1",
+      "black",
+      []
+    ],
+    [
+      "rr:2",
+      "esp:GND.2",
+      "black",
+      []
+    ]
+  ]
+}

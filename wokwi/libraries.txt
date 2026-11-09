@@ -1,0 +1,5 @@
+PubSubClient
+DHT sensor library for ESPx
+ESP32Servo
+LiquidCrystal I2C
+ArduinoJson

@@ -1,0 +1,33 @@
+{
+  "duration_seconds": 120,
+  "wall_capture_seconds": 119.763,
+  "frames": 120,
+  "fps": 1,
+  "source": "Wokwi e Node-RED reais com fluxo corrigido; prefixo isolado",
+  "events": [
+    {
+      "second": 20,
+      "event": "Solo seco; atuação automática"
+    },
+    {
+      "second": 35,
+      "event": "Solo úmido; válvula fecha"
+    },
+    {
+      "second": 45,
+      "event": "Rede interrompida",
+      "after_seq": 24
+    },
+    {
+      "second": 85,
+      "event": "Retorno com histórico separado",
+      "cutoff": 32
+    }
+  ],
+  "expected_offline": 8,
+  "received_offline": 8,
+  "missing": [],
+  "historical_cards_not_overwritten": true,
+  "controls_paused_during_replay": true,
+  "live_controls_recovered": true
+}

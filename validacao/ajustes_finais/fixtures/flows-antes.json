@@ -1,0 +1,776 @@
+[
+  {
+    "id": "tab_sg",
+    "type": "tab",
+    "label": "Smart_Green · Estufa inteligente",
+    "disabled": false,
+    "info": "Dashboard e buffer de historico"
+  },
+  {
+    "id": "broker_sg",
+    "type": "mqtt-broker",
+    "name": "EMQX público · MQTT",
+    "broker": "broker.emqx.io",
+    "port": "1883",
+    "clientid": "",
+    "autoConnect": true,
+    "usetls": false,
+    "protocolVersion": "4",
+    "keepalive": "30",
+    "cleansession": true,
+    "autoUnsubscribe": true,
+    "willTopic": "",
+    "willQos": "0",
+    "willPayload": "",
+    "birthTopic": "",
+    "birthQos": "0",
+    "birthPayload": ""
+  },
+  {
+    "id": "ui_tab_sg",
+    "type": "ui_tab",
+    "name": "Smart_Green",
+    "icon": "spa",
+    "disabled": false,
+    "hidden": false
+  },
+  {
+    "id": "group_overview",
+    "type": "ui_group",
+    "name": "Leituras atuais",
+    "tab": "ui_tab_sg",
+    "order": 2,
+    "disp": false,
+    "width": "24",
+    "collapse": false
+  },
+  {
+    "id": "group_charts",
+    "type": "ui_group",
+    "name": "Histórico da estufa",
+    "tab": "ui_tab_sg",
+    "order": 3,
+    "disp": true,
+    "width": "16",
+    "collapse": false
+  },
+  {
+    "id": "group_control",
+    "type": "ui_group",
+    "name": "Controle da irrigação",
+    "tab": "ui_tab_sg",
+    "order": 4,
+    "disp": true,
+    "width": "8",
+    "collapse": false
+  },
+  {
+    "id": "group_diag",
+    "type": "ui_group",
+    "name": "Conexão e recuperação",
+    "tab": "ui_tab_sg",
+    "order": 5,
+    "disp": true,
+    "width": "8",
+    "collapse": false
+  },
+  {
+    "id": "mqtt_in",
+    "type": "mqtt in",
+    "z": "tab_sg",
+    "name": "Telemetria JSON",
+    "topic": "scc/grupo_smartgreen_a8d747d1/telemetria",
+    "qos": "0",
+    "datatype": "utf8",
+    "broker": "broker_sg",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 160,
+    "y": 100,
+    "wires": [
+      [
+        "telemetry"
+      ]
+    ]
+  },
+  {
+    "id": "telemetry",
+    "type": "function",
+    "z": "tab_sg",
+    "name": "Telemetria e histórico pelo instante da medição",
+    "func": "// Smart_Green 2.0: armazena antes de confirmar. Duplicatas recebem novo ACK.\nlet d;try{d=typeof msg.payload==='string'?JSON.parse(msg.payload):msg.payload;}catch(e){node.warn('JSON inválido');return null;}\nconst finite=k=>typeof d[k]==='number'&&Number.isFinite(d[k]);\nif(!d||d.schema!==2||typeof d.device!=='string'||!d.device||typeof d.boot_id!=='string'||!d.boot_id||\n !['seq','uptime_ms','sent_uptime_ms','soil_pct','setpoint','buffer_count','dropped'].every(finite)||\n !Number.isSafeInteger(d.seq)||d.seq<1||!Number.isSafeInteger(d.uptime_ms)||d.uptime_ms<0||d.sent_uptime_ms<d.uptime_ms||\n d.soil_pct<0||d.soil_pct>100||!Number.isInteger(d.setpoint)||d.setpoint<10||d.setpoint>90||\n !Number.isInteger(d.buffer_count)||d.buffer_count<0||d.buffer_count>29||!Number.isInteger(d.dropped)||d.dropped<0||\n typeof d.auto!=='boolean'||typeof d.valve_open!=='boolean'||typeof d.sensor_valid!=='boolean'||typeof d.replay!=='boolean'||\n (d.sensor_valid?(!finite('temp_c')||!finite('air_humidity_pct')||d.air_humidity_pct<0||d.air_humidity_pct>100):(d.temp_c!==null||d.air_humidity_pct!==null)))return null;\nconst session=d.device+':'+d.boot_id;\nlet hist=context.get('hist')||[],sessions=context.get('sessions')||{};\nlet state=sessions[session];\nconst ack={payload:JSON.stringify({schema:2,device:d.device,boot_id:d.boot_id,seq:d.seq}),retain:false};\nif(state&&d.seq<=state.last){const outputs=Array(13).fill(null);outputs[12]=ack;return outputs;}\nif(!state)state={anchor:Date.now()-d.sent_uptime_ms,last:0,gaps:0,seen:Date.now()};\nconst missing=Math.max(0,d.seq-state.last-1);\nstate.gaps+=missing;state.last=d.seq;state.seen=Date.now();sessions[session]=state;\nfor(const key of Object.keys(sessions).sort((a,b)=>sessions[b].seen-sessions[a].seen).slice(16))delete sessions[key];\nconst ts=state.anchor+d.uptime_ms;\nhist.push({session,seq:d.seq,x:ts,uptime_ms:d.uptime_ms,soil:d.soil_pct,t:d.temp_c,h:d.air_humidity_pct,\n sensor_valid:d.sensor_valid,valve_open:d.valve_open,auto:d.auto,setpoint:d.setpoint,replay:d.replay,dropped:d.dropped});\nhist.sort((a,b)=>a.x-b.x||a.seq-b.seq);if(hist.length>500)hist=hist.slice(-500);\n// Contexto salvo antes do ACK. RAM do Node-RED: persistência em disco não é prometida.\ncontext.set('hist',hist);context.set('sessions',sessions);context.set('latest',d);\nconst series=(key,label)=>[{series:[label],data:[hist.flatMap((x,i)=>{\n const previous=hist[i-1],gap=previous&&previous.session===x.session&&x.seq>previous.seq+1;\n const point={x:x.x,y:x[key]};return gap?[{x:x.x-1,y:null},point]:[point];\n})],labels:['']}];\nconst status=`${d.auto?'AUTOMÁTICO':'MANUAL'} · Válvula ${d.valve_open?'ABERTA':'FECHADA'} · Alvo ${d.setpoint}%${d.sensor_valid?'':' · DHT22 SEM LEITURA'}`;\nreturn [\n {payload:d.soil_pct},{payload:d.temp_c},{payload:d.air_humidity_pct},\n {payload:status},{payload:{count:d.buffer_count,dropped:d.dropped,seq:d.seq,replay:d.replay,gaps:state.gaps}},\n {payload:series('soil','Umidade do solo (%)')},{payload:series('t','Temperatura (°C)')},{payload:series('h','Umidade do ar (%)')},\n {payload:d.valve_open?'ABERTA':'FECHADA'},{payload:d.auto},{payload:d.valve_open,enabled:!d.auto},{payload:d.setpoint},ack\n];\r\n",
+    "outputs": 13,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 420,
+    "y": 100,
+    "wires": [
+      [
+        "soil_gauge"
+      ],
+      [
+        "temp_gauge"
+      ],
+      [
+        "humid_gauge"
+      ],
+      [
+        "mode_text"
+      ],
+      [
+        "buffer_text"
+      ],
+      [
+        "soil_chart"
+      ],
+      [
+        "temp_chart"
+      ],
+      [
+        "humid_chart"
+      ],
+      [
+        "valve_text"
+      ],
+      [
+        "ui_auto"
+      ],
+      [
+        "ui_valve"
+      ],
+      [
+        "ui_setpoint"
+      ],
+      [
+        "mqtt_ack"
+      ]
+    ]
+  },
+  {
+    "id": "soil_gauge",
+    "type": "ui_template",
+    "z": "tab_sg",
+    "name": "Umidade do solo",
+    "group": "group_overview",
+    "order": 1,
+    "width": 8,
+    "height": 3,
+    "x": 700,
+    "y": 180,
+    "wires": [],
+    "label": "%",
+    "format": "<section class=\"sg-kpi sg-kpi--soil\"><div class=\"sg-kpi-top\"><span>Umidade do solo</span><span class=\"sg-kpi-icon\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M20 4C12 3 5 6 5 12a6 6 0 0 0 6 6c6 0 9-7 9-14Z\"/><path d=\"m4 21 10-10\"/></svg></span></div><div class=\"sg-kpi-reading\"><div class=\"sg-kpi-value\"><strong>{{msg.payload == null ? \"—\" : msg.payload.toFixed(1).replace(\".\",\",\")}}</strong><span>%</span></div><svg class=\"sg-gauge\" viewBox=\"0 0 120 80\" role=\"meter\" aria-label=\"Manômetro: Umidade do solo\" aria-valuemin=\"0\" aria-valuemax=\"100\" ng-attr-aria-valuenow=\"{{msg.payload}}\"><path class=\"sg-gauge-track\" d=\"M12 62 A48 48 0 0 1 108 62\"/><path class=\"sg-gauge-arc\" d=\"M12 62 A48 48 0 0 1 108 62\" stroke-dasharray=\"150.8\" ng-attr-stroke-dashoffset=\"{{150.8 * (1 - (msg.payload > 100 ? 100 : (msg.payload < 0 ? 0 : (msg.payload || 0)))/100)}}\"/><line class=\"sg-gauge-needle\" x1=\"60\" y1=\"62\" x2=\"60\" y2=\"31\" ng-attr-transform=\"rotate({{(msg.payload > 100 ? 100 : (msg.payload < 0 ? 0 : (msg.payload || 0)))/100*180-90}} 60 62)\"/><circle class=\"sg-gauge-center\" cx=\"60\" cy=\"62\" r=\"3\"/><text x=\"11\" y=\"78\" text-anchor=\"middle\">0</text><text x=\"109\" y=\"78\" text-anchor=\"middle\">100</text></svg></div><div class=\"sg-kpi-detail\">Irrigação orientada pela umidade</div></section>",
+    "min": 0,
+    "max": 100,
+    "colors": [
+      "#c62828",
+      "#f9a825",
+      "#2e7d32"
+    ],
+    "seg1": 30,
+    "seg2": 65,
+    "templateScope": "local",
+    "fwdInMessages": false,
+    "storeOutMessages": true,
+    "resendOnRefresh": true,
+    "className": "sg-kpi-widget"
+  },
+  {
+    "id": "temp_gauge",
+    "type": "ui_template",
+    "z": "tab_sg",
+    "name": "Temperatura",
+    "group": "group_overview",
+    "order": 2,
+    "width": 8,
+    "height": 3,
+    "x": 700,
+    "y": 225,
+    "wires": [],
+    "label": "°C",
+    "format": "<section class=\"sg-kpi sg-kpi--temp\"><div class=\"sg-kpi-top\"><span>Temperatura</span><span class=\"sg-kpi-icon\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M9 14.8V5a3 3 0 0 1 6 0v9.8a5 5 0 1 1-6 0Z\"/><path d=\"M12 8v9\"/></svg></span></div><div class=\"sg-kpi-reading\"><div class=\"sg-kpi-value\"><strong>{{msg.payload == null ? \"—\" : msg.payload.toFixed(1).replace(\".\",\",\")}}</strong><span>°C</span></div><svg class=\"sg-gauge\" viewBox=\"0 0 120 80\" role=\"meter\" aria-label=\"Manômetro: Temperatura\" aria-valuemin=\"0\" aria-valuemax=\"60\" ng-attr-aria-valuenow=\"{{msg.payload}}\"><path class=\"sg-gauge-track\" d=\"M12 62 A48 48 0 0 1 108 62\"/><path class=\"sg-gauge-arc\" d=\"M12 62 A48 48 0 0 1 108 62\" stroke-dasharray=\"150.8\" ng-attr-stroke-dashoffset=\"{{150.8 * (1 - (msg.payload > 60 ? 60 : (msg.payload < 0 ? 0 : (msg.payload || 0)))/60)}}\"/><line class=\"sg-gauge-needle\" x1=\"60\" y1=\"62\" x2=\"60\" y2=\"31\" ng-attr-transform=\"rotate({{(msg.payload > 60 ? 60 : (msg.payload < 0 ? 0 : (msg.payload || 0)))/60*180-90}} 60 62)\"/><circle class=\"sg-gauge-center\" cx=\"60\" cy=\"62\" r=\"3\"/><text x=\"11\" y=\"78\" text-anchor=\"middle\">0</text><text x=\"109\" y=\"78\" text-anchor=\"middle\">60</text></svg></div><div class=\"sg-kpi-detail\">Condição térmica da estufa</div></section>",
+    "min": 0,
+    "max": 60,
+    "colors": [
+      "#c62828",
+      "#f9a825",
+      "#2e7d32"
+    ],
+    "seg1": 18,
+    "seg2": 39,
+    "templateScope": "local",
+    "fwdInMessages": false,
+    "storeOutMessages": true,
+    "resendOnRefresh": true,
+    "className": "sg-kpi-widget"
+  },
+  {
+    "id": "humid_gauge",
+    "type": "ui_template",
+    "z": "tab_sg",
+    "name": "Umidade do ar",
+    "group": "group_overview",
+    "order": 3,
+    "width": 8,
+    "height": 3,
+    "x": 700,
+    "y": 270,
+    "wires": [],
+    "label": "%",
+    "format": "<section class=\"sg-kpi sg-kpi--air\"><div class=\"sg-kpi-top\"><span>Umidade do ar</span><span class=\"sg-kpi-icon\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M12 3s-7 8-7 12a7 7 0 0 0 14 0c0-4-7-12-7-12Z\"/><path d=\"M8 15a4 4 0 0 0 4 4\"/></svg></span></div><div class=\"sg-kpi-reading\"><div class=\"sg-kpi-value\"><strong>{{msg.payload == null ? \"—\" : msg.payload.toFixed(1).replace(\".\",\",\")}}</strong><span>%</span></div><svg class=\"sg-gauge\" viewBox=\"0 0 120 80\" role=\"meter\" aria-label=\"Manômetro: Umidade do ar\" aria-valuemin=\"0\" aria-valuemax=\"100\" ng-attr-aria-valuenow=\"{{msg.payload}}\"><path class=\"sg-gauge-track\" d=\"M12 62 A48 48 0 0 1 108 62\"/><path class=\"sg-gauge-arc\" d=\"M12 62 A48 48 0 0 1 108 62\" stroke-dasharray=\"150.8\" ng-attr-stroke-dashoffset=\"{{150.8 * (1 - (msg.payload > 100 ? 100 : (msg.payload < 0 ? 0 : (msg.payload || 0)))/100)}}\"/><line class=\"sg-gauge-needle\" x1=\"60\" y1=\"62\" x2=\"60\" y2=\"31\" ng-attr-transform=\"rotate({{(msg.payload > 100 ? 100 : (msg.payload < 0 ? 0 : (msg.payload || 0)))/100*180-90}} 60 62)\"/><circle class=\"sg-gauge-center\" cx=\"60\" cy=\"62\" r=\"3\"/><text x=\"11\" y=\"78\" text-anchor=\"middle\">0</text><text x=\"109\" y=\"78\" text-anchor=\"middle\">100</text></svg></div><div class=\"sg-kpi-detail\">Condição do ambiente</div></section>",
+    "min": 0,
+    "max": 100,
+    "colors": [
+      "#c62828",
+      "#f9a825",
+      "#2e7d32"
+    ],
+    "seg1": 30,
+    "seg2": 65,
+    "templateScope": "local",
+    "fwdInMessages": false,
+    "storeOutMessages": true,
+    "resendOnRefresh": true,
+    "className": "sg-kpi-widget"
+  },
+  {
+    "id": "mode_text",
+    "type": "ui_template",
+    "z": "tab_sg",
+    "name": "Estado da irrigação",
+    "group": "group_overview",
+    "order": 4,
+    "width": 24,
+    "height": 1,
+    "x": 700,
+    "y": 325,
+    "wires": [],
+    "label": "Estado da irrigação",
+    "format": "<div class=\"sg-summary\"><span class=\"sg-summary-mark\"></span><span>{{msg.payload || \"Aguardando a primeira leitura da estufa…\"}}</span><span class=\"sg-summary-extra\">Atualização a cada 3 s simulados</span></div>",
+    "layout": "row-spread",
+    "templateScope": "local",
+    "fwdInMessages": false,
+    "storeOutMessages": true,
+    "resendOnRefresh": true,
+    "className": "sg-summary-widget"
+  },
+  {
+    "id": "buffer_text",
+    "type": "ui_template",
+    "z": "tab_sg",
+    "name": "Recuperação de dados",
+    "group": "group_diag",
+    "order": 2,
+    "width": 8,
+    "height": 4,
+    "x": 700,
+    "y": 365,
+    "wires": [],
+    "label": "Recuperação de dados",
+    "format": "<section class=\"sg-diagnostics\"><div><span>Fila offline</span><strong>{{msg.payload.count == null ? \"—\" : msg.payload.count}}<small> / 30</small></strong></div><div><span>Amostras descartadas</span><strong>{{msg.payload.dropped == null ? \"—\" : msg.payload.dropped}}</strong></div><div><span>Última sequência</span><strong>{{msg.payload.seq == null ? \"—\" : msg.payload.seq}}</strong></div><div><span>Origem dos dados</span><strong class=\"sg-source\" ng-class=\"{'sg-replay': msg.payload.replay}\">{{msg.payload.seq == null ? \"Aguardando\" : (msg.payload.replay ? \"Reenvio\" : \"Tempo real\")}}</strong></div><div><span>Integridade da sessão</span><strong class=\"sg-source\" ng-class=\"{'sg-gap': msg.payload.gaps > 0}\">{{msg.payload.seq == null ? \"Aguardando\" : (msg.payload.gaps > 0 ? (\"Lacunas: \" + msg.payload.gaps) : \"Sem lacunas\")}}</strong></div></section>",
+    "layout": "row-spread",
+    "templateScope": "local",
+    "fwdInMessages": false,
+    "storeOutMessages": true,
+    "resendOnRefresh": true,
+    "className": "sg-diagnostics-widget"
+  },
+  {
+    "id": "valve_text",
+    "type": "ui_text",
+    "z": "tab_sg",
+    "name": "Válvula",
+    "group": "group_control",
+    "order": 4,
+    "width": 8,
+    "height": 1,
+    "x": 700,
+    "y": 400,
+    "wires": [],
+    "label": "Válvula",
+    "format": "{{msg.payload || \"Aguardando\"}}",
+    "layout": "row-spread"
+  },
+  {
+    "id": "net_text",
+    "type": "ui_template",
+    "z": "tab_sg",
+    "name": "Conexão do dispositivo",
+    "group": "group_diag",
+    "order": 1,
+    "width": 8,
+    "height": 2,
+    "x": 700,
+    "y": 445,
+    "wires": [],
+    "label": "Conexão do dispositivo",
+    "format": "<div class=\"sg-connection\" ng-class=\"{'sg-connection--online':msg.payload === 'online'}\"><span class=\"sg-dot\"></span><div><strong>{{msg.payload === \"online\" ? \"ESP32 conectado\" : (msg.payload === \"offline\" ? \"Dispositivo offline\" : \"Aguardando conexão\")}}</strong><small>{{msg.payload === \"online\" ? \"Comunicação MQTT ativa\" : \"Os dados podem continuar no buffer local\"}}</small></div></div>",
+    "layout": "row-spread",
+    "templateScope": "local",
+    "fwdInMessages": false,
+    "storeOutMessages": true,
+    "resendOnRefresh": true,
+    "className": "sg-connection-widget"
+  },
+  {
+    "id": "soil_chart",
+    "type": "ui_chart",
+    "z": "tab_sg",
+    "name": "Umidade do solo",
+    "group": "group_charts",
+    "order": 1,
+    "width": 16,
+    "height": 5,
+    "x": 720,
+    "y": 480,
+    "wires": [
+      []
+    ],
+    "label": "Umidade do solo",
+    "chartType": "line",
+    "legend": "false",
+    "xformat": "HH:mm:ss",
+    "interpolate": "linear",
+    "nodata": "Aguardando leituras",
+    "dot": false,
+    "removeOlder": "1",
+    "removeOlderPoints": "",
+    "removeOlderUnit": "3600",
+    "cutout": 0,
+    "useOneColor": false,
+    "colors": [
+      "#1C8B60"
+    ],
+    "outputs": 1,
+    "ymin": "0",
+    "ymax": "100",
+    "className": "sg-chart sg-chart-soil"
+  },
+  {
+    "id": "temp_chart",
+    "type": "ui_chart",
+    "z": "tab_sg",
+    "name": "Temperatura",
+    "group": "group_charts",
+    "order": 2,
+    "width": 8,
+    "height": 4,
+    "x": 720,
+    "y": 520,
+    "wires": [
+      []
+    ],
+    "label": "Temperatura",
+    "chartType": "line",
+    "legend": "false",
+    "xformat": "HH:mm:ss",
+    "interpolate": "linear",
+    "nodata": "Aguardando leituras",
+    "dot": false,
+    "removeOlder": "1",
+    "removeOlderPoints": "",
+    "removeOlderUnit": "3600",
+    "cutout": 0,
+    "useOneColor": false,
+    "colors": [
+      "#C98432"
+    ],
+    "outputs": 1,
+    "ymin": "10",
+    "ymax": "50",
+    "className": "sg-chart"
+  },
+  {
+    "id": "humid_chart",
+    "type": "ui_chart",
+    "z": "tab_sg",
+    "name": "Umidade do ar",
+    "group": "group_charts",
+    "order": 3,
+    "width": 8,
+    "height": 4,
+    "x": 720,
+    "y": 560,
+    "wires": [
+      []
+    ],
+    "label": "Umidade do ar",
+    "chartType": "line",
+    "legend": "false",
+    "xformat": "HH:mm:ss",
+    "interpolate": "linear",
+    "nodata": "Aguardando leituras",
+    "dot": false,
+    "removeOlder": "1",
+    "removeOlderPoints": "",
+    "removeOlderUnit": "3600",
+    "cutout": 0,
+    "useOneColor": false,
+    "colors": [
+      "#458FB4"
+    ],
+    "outputs": 1,
+    "ymin": "0",
+    "ymax": "100",
+    "className": "sg-chart"
+  },
+  {
+    "id": "mqtt_status",
+    "type": "mqtt in",
+    "z": "tab_sg",
+    "name": "LWT / Status",
+    "topic": "scc/grupo_smartgreen_a8d747d1/status",
+    "qos": "0",
+    "datatype": "utf8",
+    "broker": "broker_sg",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 170,
+    "y": 440,
+    "wires": [
+      [
+        "net_text",
+        "sg_hero"
+      ]
+    ]
+  },
+  {
+    "id": "ui_auto",
+    "type": "ui_switch",
+    "z": "tab_sg",
+    "name": "Modo automático",
+    "label": "Modo automático",
+    "tooltip": "O ESP32 abre e fecha a válvula conforme a umidade do solo.",
+    "group": "group_control",
+    "order": 1,
+    "width": 8,
+    "height": 1,
+    "passthru": false,
+    "decouple": "true",
+    "topic": "",
+    "style": "",
+    "onvalue": "true",
+    "onvalueType": "bool",
+    "onicon": "",
+    "oncolor": "#177A51",
+    "offvalue": "false",
+    "offvalueType": "bool",
+    "officon": "",
+    "offcolor": "#94A59B",
+    "animate": false,
+    "x": 180,
+    "y": 640,
+    "wires": [
+      [
+        "cmd_auto"
+      ]
+    ],
+    "className": "sg-control"
+  },
+  {
+    "id": "ui_valve",
+    "type": "ui_switch",
+    "z": "tab_sg",
+    "name": "Abrir válvula",
+    "label": "Abrir válvula",
+    "tooltip": "Desative o modo automático para controlar a válvula manualmente.",
+    "group": "group_control",
+    "order": 2,
+    "width": 8,
+    "height": 1,
+    "passthru": false,
+    "decouple": "true",
+    "topic": "",
+    "style": "",
+    "onvalue": "true",
+    "onvalueType": "bool",
+    "offvalue": "false",
+    "offvalueType": "bool",
+    "animate": false,
+    "x": 180,
+    "y": 690,
+    "wires": [
+      [
+        "cmd_valve"
+      ]
+    ],
+    "className": "sg-control"
+  },
+  {
+    "id": "ui_setpoint",
+    "type": "ui_slider",
+    "z": "tab_sg",
+    "name": "Umidade desejada (%)",
+    "label": "Umidade desejada (%)",
+    "tooltip": "A válvula abre abaixo do alvo e fecha quando o solo alcança alvo + 8%.",
+    "group": "group_control",
+    "order": 3,
+    "width": 8,
+    "height": 2,
+    "passthru": false,
+    "outs": "end",
+    "topic": "",
+    "min": 10,
+    "max": 90,
+    "step": 1,
+    "x": 190,
+    "y": 740,
+    "wires": [
+      [
+        "cmd_set"
+      ]
+    ],
+    "className": "sg-control"
+  },
+  {
+    "id": "cmd_auto",
+    "type": "function",
+    "z": "tab_sg",
+    "name": "Comando auto",
+    "func": "if(typeof msg.payload!=='boolean')return null;return {payload:JSON.stringify({auto:msg.payload}),retain:false};",
+    "outputs": 1,
+    "noerr": 0,
+    "x": 450,
+    "y": 640,
+    "wires": [
+      [
+        "mqtt_out"
+      ]
+    ]
+  },
+  {
+    "id": "cmd_valve",
+    "type": "function",
+    "z": "tab_sg",
+    "name": "Comando valve",
+    "func": "if(typeof msg.payload!=='boolean')return null;return {payload:JSON.stringify({valve:msg.payload}),retain:false};",
+    "outputs": 1,
+    "noerr": 0,
+    "x": 450,
+    "y": 690,
+    "wires": [
+      [
+        "mqtt_out"
+      ]
+    ]
+  },
+  {
+    "id": "cmd_set",
+    "type": "function",
+    "z": "tab_sg",
+    "name": "Comando setpoint",
+    "func": "const v=Number(msg.payload);if(!Number.isInteger(v)||v<10||v>90)return null;return {payload:JSON.stringify({setpoint:v}),retain:false};",
+    "outputs": 1,
+    "noerr": 0,
+    "x": 450,
+    "y": 740,
+    "wires": [
+      [
+        "mqtt_out"
+      ]
+    ]
+  },
+  {
+    "id": "mqtt_out",
+    "type": "mqtt out",
+    "z": "tab_sg",
+    "name": "Comandos para ESP32",
+    "topic": "scc/grupo_smartgreen_a8d747d1/comando",
+    "qos": "0",
+    "retain": "false",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "broker_sg",
+    "x": 710,
+    "y": 690,
+    "wires": []
+  },
+  {
+    "id": "sg_header_group",
+    "type": "ui_group",
+    "name": "Smart_Green",
+    "tab": "ui_tab_sg",
+    "order": 1,
+    "disp": false,
+    "width": "24",
+    "collapse": false
+  },
+  {
+    "id": "sg_hero",
+    "type": "ui_template",
+    "z": "tab_sg",
+    "group": "sg_header_group",
+    "order": 0,
+    "width": 24,
+    "height": 2,
+    "name": "Cabeçalho Smart_Green",
+    "templateScope": "local",
+    "fwdInMessages": false,
+    "storeOutMessages": true,
+    "resendOnRefresh": true,
+    "className": "sg-hero-widget",
+    "x": 720,
+    "y": 80,
+    "wires": [
+      []
+    ],
+    "format": "<header class=\"sg-hero\"><div class=\"sg-brand\"><div class=\"sg-brand-symbol\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M20 4C12 3 5 6 5 12a6 6 0 0 0 6 6c6 0 9-7 9-14Z\"/><path d=\"m4 21 10-10\"/></svg></div><div><span class=\"sg-eyebrow\">ESTUFA INTELIGENTE</span><h1>Smart_Green</h1><p>Condições do ambiente e controle da irrigação</p></div></div><div class=\"sg-hero-status\"><span class=\"sg-live-pill\" ng-class=\"{'sg-live-pill--online':msg.payload === 'online'}\"><span class=\"sg-dot\"></span>{{msg.payload === \"online\" ? \"Sistema online\" : (msg.payload === \"offline\" ? \"Sistema offline\" : \"Conectando\")}}</span><span class=\"sg-hero-caption\">Monitoramento da estufa</span></div></header>"
+  },
+  {
+    "id": "sg_control_help",
+    "type": "ui_template",
+    "z": "tab_sg",
+    "group": "group_control",
+    "order": 5,
+    "width": 8,
+    "height": 2,
+    "name": "Ajuda do controle",
+    "templateScope": "local",
+    "fwdInMessages": false,
+    "storeOutMessages": false,
+    "resendOnRefresh": true,
+    "className": "sg-help-widget",
+    "x": 720,
+    "y": 820,
+    "wires": [
+      []
+    ],
+    "format": "<div class=\"sg-help\"><span>COMO FUNCIONA</span><p>No modo automático, o ESP32 controla a irrigação. Desative-o para abrir ou fechar a válvula pelo painel.</p></div>"
+  },
+  {
+    "id": "sg_visual_theme",
+    "type": "ui_template",
+    "z": "tab_sg",
+    "name": "Tema moderno Smart_Green",
+    "group": "",
+    "order": 0,
+    "width": 0,
+    "height": 0,
+    "format": "<style>\n:root{--sg-forest:#153F30;--sg-green:#1C8B60;--sg-ink:#203D30;--sg-muted:#74857B;--sg-bg:#F2F6F3;--sg-line:#E3EBE5}\nbody.nr-dashboard-theme,body{background:var(--sg-bg)!important;color:var(--sg-ink);font-family:\"Segoe UI\",Arial,sans-serif!important;-webkit-font-smoothing:antialiased}\n.nr-dashboard-theme md-content{background:transparent!important}\n.nr-dashboard-theme ui-card-panel,.nr-dashboard-cardpanel{background:transparent!important;border:0!important;box-shadow:none!important}\n.nr-dashboard-theme .nr-dashboard-cardtitle{font-size:17px!important;font-weight:600!important;color:var(--sg-ink)!important;padding:8px 5px 12px!important;letter-spacing:-.2px}\n.nr-dashboard-theme md-card{border:0!important;box-shadow:none}.nr-dashboard-template{background:transparent!important;padding:0!important}\n.sg-hero{height:100%;display:flex;align-items:center;justify-content:space-between;padding:12px 6px;box-sizing:border-box;gap:24px}\n.sg-brand{display:flex;align-items:center;gap:16px}.sg-brand-symbol{width:56px;height:56px;flex:none;background:var(--sg-forest);border-radius:18px;display:grid;place-items:center;color:#D2EEDB}.sg-brand-symbol svg{width:30px;height:30px}\n.sg-eyebrow{font-size:10px;letter-spacing:2px;color:var(--sg-muted);font-weight:700}.sg-hero h1{font-size:29px;line-height:1.05;letter-spacing:-1px;font-weight:700;margin:5px 0 6px;color:var(--sg-forest)}.sg-hero p{margin:0;font-size:13px;color:var(--sg-muted)}\n.sg-hero-status{display:flex;align-items:flex-end;flex-direction:column;gap:9px}.sg-live-pill{display:inline-flex;align-items:center;gap:8px;padding:9px 13px;border-radius:30px;background:#E6ECE8;color:#617166;font-size:12px;font-weight:600;white-space:nowrap}.sg-live-pill--online{background:#E0EFE5;color:#236943}\n.sg-dot{width:7px;height:7px;display:inline-block;flex:none;border-radius:50%;background:#A9B3AB}.sg-live-pill--online .sg-dot{background:#2D9968;box-shadow:0 0 0 4px #2D996812}.sg-hero-caption{font-size:11px;color:var(--sg-muted)}\n.sg-kpi{height:100%;box-sizing:border-box;background:#FFF;border:1px solid #E5EDE7;border-radius:20px;padding:20px 23px;box-shadow:0 5px 20px #193D2A04;overflow:hidden}\n.sg-kpi-top{display:flex;align-items:center;justify-content:space-between;font-size:13px;font-weight:600;color:#617569}.sg-kpi-icon{color:#367B58;background:#ECF5EF;padding:7px;border-radius:11px;display:grid;place-items:center}.sg-kpi-icon svg{width:19px;height:19px}\n.sg-kpi-value{display:flex;align-items:baseline;gap:7px;margin-top:2px}.sg-kpi-value strong{font-size:43px;font-weight:600;letter-spacing:-2px;line-height:1.15;color:var(--sg-ink)}.sg-kpi-value>span{font-size:18px;color:#8A9B90}\n.sg-meter{height:4px;background:#EDF2EE;border-radius:4px;overflow:hidden;margin-top:10px}.sg-meter>span{display:block;height:100%;background:#44976D;border-radius:4px;transition:width .5s ease;max-width:100%}.sg-kpi-detail{font-size:10px;color:#8A9A8E;margin-top:7px}\n.sg-kpi--temp .sg-kpi-icon{background:#FBF2E6;color:#BA843F}.sg-kpi--temp .sg-meter>span{background:#D7A669}.sg-kpi--air .sg-kpi-icon{background:#EDF5F9;color:#558BA5}.sg-kpi--air .sg-meter>span{background:#75ABC2}\n.sg-summary{height:100%;display:flex;align-items:center;gap:9px;padding:0 7px;font-size:12px;color:#5E7768;box-sizing:border-box}.sg-summary-mark{height:6px;width:6px;border-radius:50%;background:#79A78B;flex:none}.sg-summary-extra{margin-left:auto;color:#95A397;font-size:10px}\n.nr-dashboard-chart{background:#FFF!important;border:1px solid #E5EDE7!important;border-radius:18px!important;box-sizing:border-box;padding:12px 10px!important;box-shadow:0 5px 20px #193D2A03!important}.nr-dashboard-theme .nr-dashboard-chart-title{font-size:13px!important;font-weight:600!important;color:var(--sg-ink)!important}\n.nr-dashboard-switch,.nr-dashboard-slider,.nr-dashboard-text{background:#FFF!important;box-sizing:border-box;border-left:1px solid #E5EDE7!important;border-right:1px solid #E5EDE7!important}.nr-dashboard-switch{padding-left:16px!important;padding-right:16px!important}.nr-dashboard-switch:first-child{border-radius:18px 18px 0 0!important}\n.nr-dashboard-theme md-switch.md-checked .md-thumb{background:#267E52!important}.nr-dashboard-theme md-switch.md-checked .md-bar{background:#A7CEB6!important}.nr-dashboard-theme md-slider .md-thumb:after{background:#267E52!important;border-color:#267E52!important}.nr-dashboard-theme md-slider .md-track.md-track-fill{background:#267E52!important}.nr-dashboard-theme .label{font-size:13px!important;color:#405B4A!important}\n.sg-help{height:100%;box-sizing:border-box;background:#FFF;border:1px solid #E5EDE7;border-top:0;border-radius:0 0 18px 18px;padding:12px 17px;overflow:hidden}.sg-help>span{color:#92A095;font-size:9px;font-weight:700;letter-spacing:1.5px}.sg-help p{font-size:11px;line-height:1.7;color:#7D8E81;margin:7px 0 0}\n.sg-connection{display:flex;gap:11px;align-items:center;height:100%;box-sizing:border-box;padding:16px 18px;background:#FFF;border-radius:18px;border:1px solid #E5EDE7}.sg-connection>.sg-dot{width:9px;height:9px;background:#C69367}.sg-connection--online>.sg-dot{background:#2D9968;box-shadow:0 0 0 5px #2D996810}.sg-connection strong{display:block;font-size:12px;font-weight:600;color:#405B4A}.sg-connection small{display:block;font-size:10px;color:#93A096;margin-top:5px;line-height:1.5}\n.sg-diagnostics{height:100%;background:#FFF;border:1px solid #E5EDE7;border-radius:18px;padding:8px 18px;box-sizing:border-box}.sg-diagnostics>div{display:flex;align-items:center;justify-content:space-between;gap:8px;height:20%;box-sizing:border-box;border-bottom:1px solid #F0F3F0;font-size:11px;color:#7B8E80}.sg-diagnostics>div:last-child{border:0}.sg-diagnostics strong{font-size:17px;font-weight:600;color:#34533F;white-space:nowrap}.sg-diagnostics small{font-size:10px;font-weight:400;color:#9AA89E}.sg-diagnostics .sg-source{font-size:10px;background:#EAF3ED;color:#447954;border-radius:6px;padding:5px 8px}.sg-diagnostics .sg-replay{background:#FCF1DC;color:#9A7330}\n@media(max-width:700px){.sg-hero-status{display:none}.sg-hero h1{font-size:24px}.sg-brand-symbol{width:44px;height:44px;border-radius:14px}.sg-hero p{font-size:11px}.sg-summary-extra{display:none}.sg-kpi{padding:16px}.sg-kpi-value strong{font-size:38px}}\n\n/* Layout fluido, independente das posições fixas do Dashboard clássico. */\n#Tab_Smart_Green{display:grid!important;grid-template-columns:minmax(0,1.9fr) minmax(300px,1fr);grid-template-areas:\"hero hero\" \"overview overview\" \"history controls\" \"history diagnostics\";gap:22px;align-items:start;width:100%;max-width:1440px;margin:0 auto;box-sizing:border-box;padding:24px 36px 34px;min-height:0!important;height:auto!important}\n#Tab_Smart_Green>ui-card-panel{position:static!important;left:auto!important;top:auto!important;width:auto!important;min-width:0;max-width:100%;margin:0!important}\n#Tab_Smart_Green>ui-card-panel[node-id=\"sg_header_group\"]{grid-area:hero}\n#Tab_Smart_Green>ui-card-panel[node-id=\"group_overview\"]{grid-area:overview}\n#Tab_Smart_Green>ui-card-panel[node-id=\"group_charts\"]{grid-area:history}\n#Tab_Smart_Green>ui-card-panel[node-id=\"group_control\"]{grid-area:controls}\n#Tab_Smart_Green>ui-card-panel[node-id=\"group_diag\"]{grid-area:diagnostics}\n#Tab_Smart_Green .nr-dashboard-cardpanel{width:100%!important;min-width:0}\n#Tab_Smart_Green .nr-dashboard-cardcontainer{display:grid!important;grid-template-columns:minmax(0,1fr);gap:12px;width:100%!important;height:auto!important;min-width:0;box-sizing:border-box}\n#Tab_Smart_Green .nr-dashboard-cardcontainer>md-card{position:relative!important;left:0!important;top:0!important;transform:none!important;width:100%!important;max-width:100%;min-width:0;box-sizing:border-box;margin:0!important}\n#Tab_Smart_Green [node-id=\"group_overview\"] .nr-dashboard-cardcontainer{grid-template-columns:repeat(3,minmax(0,1fr))}\n#Tab_Smart_Green [node-id=\"group_charts\"] .nr-dashboard-cardcontainer{grid-template-columns:repeat(2,minmax(0,1fr))}\n#Tab_Smart_Green .sg-summary-widget{grid-column:1/-1;height:34px!important}\n#Tab_Smart_Green .sg-kpi-widget{height:170px!important}\n#Tab_Smart_Green .sg-hero-widget{height:96px!important}\n#Tab_Smart_Green .sg-chart{background:#FFF!important;border:1px solid #E5EDE7!important;border-radius:18px;overflow:hidden;box-shadow:0 5px 20px #193D2A03;height:248px!important}\n#Tab_Smart_Green .sg-chart-soil{grid-column:1/-1;height:312px!important}\n#Tab_Smart_Green .nr-dashboard-chart-container{width:100%!important;height:100%!important;display:flex;flex-direction:column;box-sizing:border-box}\n#Tab_Smart_Green .nr-dashboard-chart-title{font-size:13px!important;font-weight:600!important;line-height:22px;box-sizing:border-box;flex:none;padding:12px 16px 0;height:36px;color:#36523F!important}\n#Tab_Smart_Green .nr-dashboard-chart{border:0!important;border-radius:0!important;box-shadow:none!important;flex:1;min-height:0;width:100%!important;height:calc(100% - 36px)!important;box-sizing:border-box;padding:8px 12px 10px!important}\n#Tab_Smart_Green .nr-dashboard-chart canvas{max-width:100%;max-height:100%}\n#Tab_Smart_Green [node-id=\"group_control\"] .nr-dashboard-cardcontainer{gap:0;border:1px solid #E5EDE7;border-radius:18px;background:#FFF;overflow:hidden}\n#Tab_Smart_Green .sg-control{border:0!important}\n#Tab_Smart_Green .sg-help{border:0!important}\n#Tab_Smart_Green .nr-dashboard-cardtitle{padding:0 4px 12px!important;margin:0!important;height:34px!important;box-sizing:border-box;width:100%!important}\n.sg-hero-status{padding-right:4px}\n.sg-kpi-top{font-size:14px}.sg-kpi-detail{font-size:11px}\n.sg-diagnostics>div{font-size:12px}\n@media(max-width:1000px){#Tab_Smart_Green{grid-template-columns:minmax(0,1fr);grid-template-areas:\"hero\" \"overview\" \"history\" \"controls\" \"diagnostics\";padding:18px 24px 28px}.sg-summary-extra{display:none}}\n@media(max-width:650px){#Tab_Smart_Green{padding:12px 16px 24px;gap:18px}#Tab_Smart_Green [node-id=\"group_overview\"] .nr-dashboard-cardcontainer,#Tab_Smart_Green [node-id=\"group_charts\"] .nr-dashboard-cardcontainer{grid-template-columns:minmax(0,1fr)}#Tab_Smart_Green .sg-kpi-widget{height:166px!important}#Tab_Smart_Green .sg-hero-widget{height:98px!important}#Tab_Smart_Green .sg-chart-soil{height:290px!important}.sg-summary{line-height:1.5;font-size:11px}.sg-hero-status{display:none}.sg-brand{gap:12px}}\n\n.sg-kpi-reading{display:flex;align-items:center;justify-content:space-between;gap:16px;height:77px}.sg-gauge{width:112px;height:75px;flex:none;overflow:visible}.sg-gauge path{fill:none;stroke-width:5;stroke-linecap:round}.sg-gauge-track{stroke:#EDF2EE}.sg-gauge-arc{stroke:#44976D;transition:stroke-dashoffset .5s ease}.sg-gauge-needle{stroke:#315A40;stroke-width:1.7;stroke-linecap:round;transition:transform .5s ease}.sg-gauge-center{fill:#315A40}.sg-gauge text{font:8px Arial,sans-serif;fill:#9BA89F}.sg-kpi--temp .sg-gauge-arc{stroke:#D7A669}.sg-kpi--temp .sg-gauge-needle{stroke:#A9814D}.sg-kpi--temp .sg-gauge-center{fill:#A9814D}.sg-kpi--air .sg-gauge-arc{stroke:#75ABC2}.sg-kpi--air .sg-gauge-needle{stroke:#527F94}.sg-kpi--air .sg-gauge-center{fill:#527F94}.sg-kpi-detail{margin-top:5px}.sg-kpi-value{margin-top:-6px}@media(max-width:650px){.sg-gauge{width:112px;height:75px}.sg-kpi-reading{height:78px}}\n.sg-diagnostics .sg-gap{background:#FDEBE7;color:#A53B28}</style>",
+    "templateScope": "global",
+    "fwdInMessages": false,
+    "storeOutMessages": false,
+    "resendOnRefresh": true,
+    "x": 710,
+    "y": 40,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "sg_ui_base",
+    "type": "ui_base",
+    "theme": {
+      "name": "theme-custom",
+      "lightTheme": {
+        "default": "#1C8B60",
+        "baseColor": "#1C8B60",
+        "baseFont": "\"Segoe UI\",Arial,sans-serif",
+        "edited": true
+      },
+      "darkTheme": {
+        "default": "#1C8B60",
+        "baseColor": "#1C8B60",
+        "baseFont": "\"Segoe UI\",Arial,sans-serif",
+        "edited": false
+      },
+      "customTheme": {
+        "name": "Smart_Green",
+        "default": "#1C8B60",
+        "baseColor": "#1C8B60",
+        "baseFont": "\"Segoe UI\",Arial,sans-serif"
+      },
+      "themeState": {
+        "base-color": {
+          "value": "#1C8B60",
+          "edited": true
+        },
+        "base-font": {
+          "value": "\"Segoe UI\",Arial,sans-serif",
+          "edited": true
+        },
+        "page-titlebar-backgroundColor": {
+          "value": "#153F30",
+          "edited": true
+        },
+        "page-backgroundColor": {
+          "value": "#F2F6F3",
+          "edited": true
+        },
+        "page-sidebar-backgroundColor": {
+          "value": "#FFFFFF",
+          "edited": true
+        },
+        "group-textColor": {
+          "value": "#294B38",
+          "edited": true
+        },
+        "group-borderColor": {
+          "value": "#F2F6F3",
+          "edited": true
+        },
+        "group-backgroundColor": {
+          "value": "#F2F6F3",
+          "edited": true
+        },
+        "widget-textColor": {
+          "value": "#294B38",
+          "edited": true
+        },
+        "widget-backgroundColor": {
+          "value": "#FFFFFF",
+          "edited": true
+        },
+        "widget-borderColor": {
+          "value": "#E5EDE7",
+          "edited": true
+        }
+      }
+    },
+    "site": {
+      "name": "Smart_Green",
+      "hideToolbar": "true",
+      "allowSwipe": "false",
+      "lockMenu": "true",
+      "allowTempTheme": "false",
+      "dateFormat": "DD/MM/YYYY",
+      "sizes": {
+        "sx": 48,
+        "sy": 48,
+        "gx": 10,
+        "gy": 10,
+        "cx": 8,
+        "cy": 8,
+        "px": 0,
+        "py": 0
+      }
+    }
+  },
+  {
+    "id": "mqtt_ack",
+    "type": "mqtt out",
+    "z": "tab_sg",
+    "name": "Confirmação após armazenar",
+    "topic": "scc/grupo_smartgreen_a8d747d1/ack",
+    "qos": "1",
+    "retain": "false",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "broker_sg",
+    "x": 1120,
+    "y": 650,
+    "wires": []
+  }
+]

@@ -1,0 +1,13 @@
+{
+  "name": "smartgreen-painel-local",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Ambiente local do projeto Smart_Green",
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "node-red": "^4.1.0",
+    "node-red-dashboard": "^3.6.6"
+  }
+}
