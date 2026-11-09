@@ -39,6 +39,21 @@ No Windows, também é possível usar `1_INSTALAR_PAINEL.cmd` e `2_INICIAR_PAINE
 
 Se você executar uma cópia independente do circuito e do painel, use um prefixo MQTT próprio nos dois lados para separar as mensagens. O [guia técnico](docs/GUIA_TECNICO.md) descreve os tópicos e os arquivos envolvidos.
 
+
+## Importar e exportar no Node-RED
+
+[**Baixar o `flows.json` do Smart_Green**](https://raw.githubusercontent.com/mariomont30/Smart_Green/main/node-red/flows.json)
+
+Em outra instalação do Node-RED, siga os passos abaixo.
+
+1. No menu **Gerenciar paleta**, instale o pacote `node-red-dashboard` na versão `3.6.6`.
+2. Abra **Importar** (`Ctrl+I`), selecione o arquivo `flows.json` e importe o fluxo em uma nova aba.
+3. Clique em **Deploy** e abra o painel em `http://localhost:1880/ui/`.
+
+O arquivo inclui os nós do painel, os controles, os gráficos e a configuração MQTT da versão do repositório. O histórico de leituras e os pacotes instalados ficam fora do arquivo.
+
+Para exportar a configuração em uso, abra **Exportar** (`Ctrl+E`), selecione **Todos os fluxos** e clique em **Baixar**. Use essa opção quando quiser incluir todas as abas e configurações do editor. [Guia de importação e exportação do Node-RED](https://nodered.org/docs/user-guide/editor/workspace/import-export)
+
 ## Validação local
 
 Execute o comando abaixo na raiz do repositório.
